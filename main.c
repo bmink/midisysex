@@ -6,6 +6,7 @@
 #include <time.h>
 #include "bstr.h"
 #include "barr.h"
+#include "midi_osx.h"
 #include "midi_queue.h"
 
 
@@ -22,7 +23,6 @@ midi_queue_t	*midi_outq;
 void *midi_writer(void *);
 int midi_get_resp();
 
-static	MIDIPortRef	osx_midiout;
 
 int
 main(int argc, char **argv)
@@ -79,6 +79,8 @@ main(int argc, char **argv)
 	bprintf(midireq, "%c%c%c%c", 0x42, 0x50, 0x00, 0x00);
 	ret = midi_queue_addmsg_sysex(midi_outq,
 	    (unsigned char *) bget(midireq), bstrlen(midireq));
+
+
 
 
 	/* Usually a program like this would have a writer and a reader thread.
@@ -177,8 +179,6 @@ midi_get_resp()
 }
 
 
-#define MAX_MIDIMSG	65535
-
 void *
 midi_writer(void *arg)
 {
@@ -187,19 +187,10 @@ midi_writer(void *arg)
 	int		beatcnt;
 	midi_msg_t	msg;
 	bstr_t		*midimsg;
-	unsigned char	buf[MAX_MIDIMSG];
-	MIDITimeStamp 	timestamp;
-	MIDIPacketList	*packetlist;
-	MIDIPacket	*currentpacket;
-	ItemCount	destcnt;
-	ItemCount	idest;
-	MIDIEndpointRef destref;
-	OSStatus	oret;
 
 	beatclkcnt = 0;
 	beatcnt = 0;
 	midimsg = 0;
-	timestamp = 0;
 
 	printf("MIDI writer thread started.\n");
 
@@ -236,27 +227,14 @@ midi_writer(void *arg)
 
 	
 			if(!bstrempty(midimsg)) {
-				memset(buf, 0, MAX_MIDIMSG);
-				packetlist = (MIDIPacketList *) buf;
-				currentpacket = MIDIPacketListInit(packetlist);
-				currentpacket = MIDIPacketListAdd(packetlist,
-				    MAX_MIDIMSG, currentpacket, timestamp,
-				    bstrlen(midimsg),
-				    (unsigned char *) bget(midimsg));
-
-				destcnt = MIDIGetNumberOfDestinations();
-
-
-				for(idest = 0; idest < destcnt; idest++) {
-					destref = MIDIGetDestination(idest);
-					oret = MIDISend(osx_midiout, destref,
-					    packetlist);
-					if(oret != 0) {
-						fprintf(stderr,
-						    "Couldn't send MIDI\n.");
-					} else
-						printf("MIDI msg sent.\n");
-				}
+				ret = midi_osx_sendmsg(
+				    (unsigned char *) bget(midimsg),
+				    bstrlen(midimsg));
+				if(ret != 0) {
+					fprintf(stderr,
+					    "Couldn't send MIDI message.\n");
+				} else
+					printf("MIDI message sent.\n");
 
 			} else {
 				printf("MIDI message not sent.\n");

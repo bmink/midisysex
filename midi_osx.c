@@ -20,7 +20,6 @@ extern midi_queue_t *midi_inq;
 void midi_osx_reader_callback(const MIDIPacketList *, void *, void *);
 
 
-
 int
 midi_osx_init()
 {
@@ -89,7 +88,7 @@ midi_osx_uninit()
 	OSStatus	oret;
 
 	if(!midi_osx_ready)
-		return ENOENT;
+		return ENOEXEC;
 
 	oret = MIDIPortDispose(osx_midiin);
 	if(oret) {
@@ -211,4 +210,46 @@ midi_osx_reader_callback(const MIDIPacketList *packets, void* readconn,
 		return;
 	}
 
+}
+
+
+#define MIDI_OSX_MAXMSG     65535
+
+int
+midi_osx_sendmsg(unsigned char *msg, size_t msgsiz)
+{
+	MIDITimeStamp   timestamp;
+	MIDIPacketList  *packetlist;
+	MIDIPacket      *currentpacket;
+	ItemCount       destcnt;
+	ItemCount       idest;
+	MIDIEndpointRef destref;
+	OSStatus        oret;
+	unsigned char	buf[MIDI_OSX_MAXMSG];
+
+	timestamp = 0;	/* "Send now." */
+
+
+	if(!midi_osx_ready)
+		return ENOEXEC;
+
+
+	/* Send to all MIDI destinations in the system. */
+
+	memset(buf, 0, MIDI_OSX_MAXMSG);
+	packetlist = (MIDIPacketList *) buf;
+	currentpacket = MIDIPacketListInit(packetlist);
+	currentpacket = MIDIPacketListAdd(packetlist, MIDI_OSX_MAXMSG,
+	    currentpacket, timestamp, msgsiz, msg);
+
+	destcnt = MIDIGetNumberOfDestinations();
+
+	for(idest = 0; idest < destcnt; idest++) {
+		destref = MIDIGetDestination(idest);
+		oret = MIDISend(osx_midiout, destref, packetlist);
+		if(oret != 0)
+			return ENOEXEC;
+	}
+
+	return 0;
 }
