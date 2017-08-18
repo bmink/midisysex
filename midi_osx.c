@@ -24,10 +24,6 @@ void midi_osx_reader_callback(const MIDIPacketList *, void *, void *);
 int
 midi_osx_init()
 {
-	/* In OS X, MIDI messages come in through a callback. We read the
-	 * message from the OS here, put it on the in queue, and broadcast
-	 * on the queue's condvar.  */
-
 	OSStatus	oret;
         ItemCount	osx_srccnt;
         ItemCount	osx_i;
@@ -126,92 +122,93 @@ void
 midi_osx_reader_callback(const MIDIPacketList *packets, void* readconn,
 	void* srcconn)
 {
-	const MIDIPacket        *packet;
-        int                     i;
-        int                     t;
-        int                     cnt;
-        int                     anyadded;
-        int                     ret;
-        unsigned char           dat;
+	/* In OS X, MIDI messages come in through a callback. We read the
+	 * message from the OS here, put it on the in queue, and broadcast
+	 * on the queue's condvar.  */
 
-        packet = &packets->packet[0];
-        cnt = packets->numPackets;
-        anyadded = 0;
+	const MIDIPacket	*packet;
+	int			i;
+	int			t;
+	int			cnt;
+	int			anyadded;
+	int			ret;
+	unsigned char		dat;
 
-        ret = pthread_mutex_lock(&midi_inq->mq_mutex);
-        if(ret != 0) {
-                fprintf(stderr, "Can't lock queue: %s\n", strerror(ret));
-                return;
-        }
- 
+	packet = &packets->packet[0];
+	cnt = packets->numPackets;
+	anyadded = 0;
 
-        for (i = 0; i < cnt; ++i) {
+	ret = pthread_mutex_lock(&midi_inq->mq_mutex);
+	if(ret != 0) {
+		fprintf(stderr, "Can't lock queue: %s\n", strerror(ret));
+		return;
+	}
 
-                if(packet == NULL)
-                        break;
+	for (i = 0; i < cnt; ++i) {
 
-                for(t = 0; t < packet->length; ++t) {
-                        dat = packet->data[t];
+		if(packet == NULL)
+			break;
 
-                        switch(dat) {
-                                case 0xF8:
-                                        /* Clock */
-                                        ret = midi_queue_addmsg_sysrt(midi_inq,
-                                            MIDI_MSG_SYSRT_CLOCK);
-                                        if(ret != 0) {
-                                                fprintf(stderr,
-                                                    "Can't add MIDI message:"
-                                                     " %s\n", strerror(ret));
-                                        }
-                                        anyadded++;
-                                        break;
-                                case 0xFA:
-                                        /* Start */
-                                        ret = midi_queue_addmsg_sysrt(midi_inq,
-                                            MIDI_MSG_SYSRT_START);
-                                        if(ret != 0) {
-                                                fprintf(stderr,
-                                                    "Can't add MIDI message:"
-                                                     " %s\n", strerror(ret));
-                                        }
-                                        anyadded++;
-                                        break;
-                                case 0xFC:
-                                        /* Stop */
-                                        ret = midi_queue_addmsg_sysrt(midi_inq,
-                                            MIDI_MSG_SYSRT_STOP);
-                                        if(ret != 0) {
-                                                fprintf(stderr,
-                                                    "Can't add MIDI message:"
-                                                     " %s\n", strerror(ret));
-                                        }
-                                        anyadded++;
-                                        break;
-                        }
-                }
+		for(t = 0; t < packet->length; ++t) {
+			dat = packet->data[t];
 
-                packet = MIDIPacketNext(packet);
-        }
+			switch(dat) {
+			case 0xF8:
+				/* Clock */
+				ret = midi_queue_addmsg_sysrt(midi_inq,
+				    MIDI_MSG_SYSRT_CLOCK);
+				if(ret != 0) {
+					fprintf(stderr,
+					    "Can't add MIDI message: %s\n",
+					    strerror(ret));
+				}
+				anyadded++;
+				break;
+			case 0xFA:
+				/* Start */
+				ret = midi_queue_addmsg_sysrt(midi_inq,
+				    MIDI_MSG_SYSRT_START);
+				if(ret != 0) {
+					fprintf(stderr,
+					    "Can't add MIDI message: %s\n",
+					    strerror(ret));
+				}
+				anyadded++;
+				break;
+			case 0xFC:
+				/* Stop */
+				ret = midi_queue_addmsg_sysrt(midi_inq,
+				    MIDI_MSG_SYSRT_STOP);
+				if(ret != 0) {
+					fprintf(stderr,
+					    "Can't add MIDI message:"
+					    " %s\n", strerror(ret));
+				}
+				anyadded++;
+				break;
+			}
+		}
 
+		packet = MIDIPacketNext(packet);
+	}
 
-
-        if(anyadded) {
-                /* Broadcast */
-                ret = pthread_cond_broadcast(&midi_inq->mq_cond);
-                if(ret != 0) {
-                        fprintf(stderr, "Can't broadcast on convar: %s\n",
-                            strerror(ret));
-                        return;
-                }
+	if(anyadded) {
+		/* Broadcast */
+		ret = pthread_cond_broadcast(&midi_inq->mq_cond);
+		if(ret != 0) {
+			fprintf(stderr, "Can't broadcast on convar: %s\n",
+			    strerror(ret));
+			return;
+		}
 #if 0
-                printf("%d messages on inqueue\n", midi_inq->mq_cnt);
+		printf("%d messages on inqueue\n", midi_inq->mq_cnt);
 #endif
-        }
+	}
 
-        ret = pthread_mutex_unlock(&midi_inq->mq_mutex);
-        if(ret != 0) {
-                fprintf(stderr, "Can't unlock queue: %s\n", strerror(ret));
-                return;
-        }
+	ret = pthread_mutex_unlock(&midi_inq->mq_mutex);
+	if(ret != 0) {
+	fprintf(stderr, "Can't unlock queue: %s\n", strerror(ret));
+		return;
+	}
 
 }
