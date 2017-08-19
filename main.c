@@ -29,11 +29,10 @@ main(int argc, char **argv)
 {
 	int		ret;
 	pthread_t	proc_thrd;
-	bstr_t		*midireq;
+	unsigned char	midireq[] = { 0x42, 0x50, 0x00, 0x00 };
 
 	midi_inq = NULL;
 	midi_outq = NULL;
-	midireq = NULL;
 
 #if 0
 	if(argc != 2 || xstrempty(argv[1])) {
@@ -69,19 +68,10 @@ main(int argc, char **argv)
 		exit(-1);
 	}
 
-	midireq = binit();
-	if(midireq == NULL) {
-		fprintf(stderr, "Can't allocate request buffer!\n");
-		goto end_label;
-	}
-
 	/* Search device request for electribe 2 */
-	bprintf(midireq, "%c%c%c%c", 0x42, 0x50, 0x00, 0x00);
+
 	ret = midi_queue_addmsg_sysex(midi_outq,
-	    (unsigned char *) bget(midireq), bstrlen(midireq));
-
-
-
+	    (unsigned char *) midireq, 4);
 
 	/* Usually a program like this would have a writer and a reader thread.
 	 * However, since here we're just waiting for a specific response,
@@ -90,11 +80,6 @@ main(int argc, char **argv)
 
 	ret = midi_get_resp();
 
-
-end_label:
-
-	if(midireq != NULL)
-		buninit(&midireq);
 
 	ret = midi_osx_uninit();
 	if(ret != 0) {

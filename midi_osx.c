@@ -201,13 +201,11 @@ midi_osx_reader_callback(const MIDIPacketList *packets, void* readconn,
 				anyadded++;
 				break;
 			case 0xF0:
-printf("Sysex beg\n");
 				++insysex;
 				sysexbeg = t + 1;
 				break;
 
 			case 0xF7:
-printf("Sysex end\n");
 				if(!insysex) {
 					fprintf(stderr,
 					    "Received sysex end but never saw"
@@ -229,6 +227,7 @@ printf("Sysex end\n");
 				}
 
 				insysex = 0;
+
 
 			}
 		}
