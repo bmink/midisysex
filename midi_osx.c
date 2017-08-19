@@ -143,16 +143,20 @@ midi_osx_reader_callback(const MIDIPacketList *packets, void* readconn,
 	int			anyadded;
 	int			ret;
 	unsigned char		dat;
+	int			insysex;
+	int			sysexbeg;
 
 	packet = &packets->packet[0];
 	cnt = packets->numPackets;
 	anyadded = 0;
+	insysex = 0;
 
 	ret = pthread_mutex_lock(&midi_inq->mq_mutex);
 	if(ret != 0) {
 		fprintf(stderr, "Can't lock queue: %s\n", strerror(ret));
 		return;
 	}
+
 
 	for (i = 0; i < cnt; ++i) {
 
@@ -196,8 +200,46 @@ midi_osx_reader_callback(const MIDIPacketList *packets, void* readconn,
 				}
 				anyadded++;
 				break;
+			case 0xF0:
+printf("Sysex beg\n");
+				++insysex;
+				sysexbeg = t + 1;
+				break;
+
+			case 0xF7:
+printf("Sysex end\n");
+				if(!insysex) {
+					fprintf(stderr,
+					    "Received sysex end but never saw"
+					    " beginning!\n");
+					break;
+				}
+				if(sysexbeg >= t) {
+					fprintf(stderr,
+					    "Zero length Sysex received!\n");
+					break;
+				}
+				ret = midi_queue_addmsg_sysex(midi_inq,
+				    (unsigned char *)&packet->data[sysexbeg],
+				    t - sysexbeg);
+				if(ret != 0) {
+					fprintf(stderr,
+					    "Can't add MIDI message:"
+					    " %s\n", strerror(ret));
+				}
+
+				insysex = 0;
+
 			}
 		}
+
+		if(insysex) {
+			fprintf(stderr,
+			    "MIDI packet ended in the middle of sysex!\n");
+			insysex = 0;
+		}
+
+		
 
 		packet = MIDIPacketNext(packet);
 	}
