@@ -8,6 +8,7 @@
 #include "barr.h"
 #include "midi_osx.h"
 #include "midi_queue.h"
+#include "bmidi.h"
 
 
 void
