@@ -151,6 +151,10 @@ midi_osx_reader_callback(const MIDIPacketList *packets, void* readconn,
 	anyadded = 0;
 	insysex = 0;
 
+#if 0
+	printf("MIDI reader callback called\n");
+#endif
+
 	ret = pthread_mutex_lock(&midi_inq->mq_mutex);
 	if(ret != 0) {
 		fprintf(stderr, "Can't lock queue: %s\n", strerror(ret));
@@ -169,6 +173,10 @@ midi_osx_reader_callback(const MIDIPacketList *packets, void* readconn,
 			switch(dat) {
 			case 0xF8:
 				/* Clock */
+#if 0
+	printf("Clock\n");
+#endif
+
 				ret = midi_queue_addmsg_sysrt(midi_inq,
 				    MIDI_MSG_SYSRT_CLOCK);
 				if(ret != 0) {
@@ -201,6 +209,9 @@ midi_osx_reader_callback(const MIDIPacketList *packets, void* readconn,
 				anyadded++;
 				break;
 			case 0xF0:
+#if 1
+	printf("Sysex\n");
+#endif
 				++insysex;
 				sysexbeg = t + 1;
 				break;
@@ -244,13 +255,6 @@ midi_osx_reader_callback(const MIDIPacketList *packets, void* readconn,
 	}
 
 	if(anyadded) {
-		/* Broadcast */
-		ret = pthread_cond_broadcast(&midi_inq->mq_cond);
-		if(ret != 0) {
-			fprintf(stderr, "Can't broadcast on convar: %s\n",
-			    strerror(ret));
-			return;
-		}
 #if 0
 		printf("%d messages on inqueue\n", midi_inq->mq_cnt);
 #endif

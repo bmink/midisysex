@@ -45,6 +45,7 @@ int
 _midi_queue_addmsg(midi_queue_t *mq, midi_msg_t mmsg)
 {
 	midi_queue_ent_t	*newent;
+	int			ret;
 
 	if(mq == NULL)
 		return EINVAL;
@@ -64,6 +65,14 @@ _midi_queue_addmsg(midi_queue_t *mq, midi_msg_t mmsg)
 	}
 
 	++mq->mq_cnt; 
+
+	/* Broadcast */
+	ret = pthread_cond_broadcast(&mq->mq_cond);
+	if(ret != 0) {
+		fprintf(stderr, "Can't broadcast on convar: %s\n",
+		    strerror(ret));
+		return ENOEXEC;
+	}
 
 	return 0;
 }

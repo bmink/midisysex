@@ -29,7 +29,9 @@ main(int argc, char **argv)
 {
 	int		ret;
 	pthread_t	proc_thrd;
-	unsigned char	midireq[] = { 0x42, 0x50, 0x00, 0x00 };
+	unsigned char	midireq[] = { 0x42, 0x50, 0x00, 0x01 };
+	//unsigned char	midireq[] = { 0x7E, 0x7F, 0x06, 0x01 };
+	//unsigned char	midireq[] = { 0x42, 0x30, 0x00, 0x01, 0x23, 0x10 };
 
 	midi_inq = NULL;
 	midi_outq = NULL;
@@ -178,6 +180,7 @@ midi_writer(void *arg)
 	midimsg = 0;
 
 	printf("MIDI writer thread started.\n");
+	fflush(stdout);
 
 	ret = pthread_mutex_lock(&midi_outq->mq_mutex);
 	if(ret != 0) {
