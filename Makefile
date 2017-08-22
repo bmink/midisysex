@@ -1,5 +1,5 @@
 P = midisysex
-OBJS = main.o midi_queue.o midi_osx.o midi.o
+OBJS = main.o midi_queue.o midi_osx.o
 CFLAGS = -g -Wall
 LDLIBS = -lb -framework CoreMIDI -framework CoreServices
 

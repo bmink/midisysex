@@ -8,7 +8,6 @@
 #include "barr.h"
 #include "midi_osx.h"
 #include "midi_queue.h"
-#include "bmidi.h"
 
 
 void
@@ -71,7 +70,6 @@ main(int argc, char **argv)
 		exit(-1);
 	}
 
-	/* Search device request for electribe 2 */
 
 	ret = midi_queue_addmsg_sysex(midi_outq,
 	    (unsigned char *) midireq, 4);

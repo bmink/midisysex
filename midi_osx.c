@@ -17,12 +17,18 @@
 #define MIDI_OSX_CLIENTNAME	"midi_osx.c"
 #define MIDI_OSX_INPORTNAME	"midi_osx.c_in"
 #define MIDI_OSX_OUTPORTNAME	"midi_osx.c_out"
+#define MIDI_OSX_MAXMSG   	  65535
 
 static MIDIPortRef osx_midiin;
 static MIDIPortRef osx_midiout;
 static MIDIClientRef osx_midiclient;
 
 static int midi_osx_ready = 0;
+
+/* Buffer to hold incoming sysex data across callbacks. */
+static unsigned char sysex_in[MIDI_OSX_MAXMSG];
+static size_t sysex_in_siz;
+static int in_sysex;
 
 
 static  MIDIPortRef osx_midiout;
@@ -87,6 +93,8 @@ midi_osx_init()
 		return ENOEXEC;
 	}
 
+	in_sysex = 0;
+	sysex_in_siz = 0;
 
 	++midi_osx_ready;
 	return 0;
@@ -127,7 +135,6 @@ midi_osx_uninit()
 }
 
 
-
 void
 midi_osx_reader_callback(const MIDIPacketList *packets, void* readconn,
 	void* srcconn)
@@ -143,13 +150,10 @@ midi_osx_reader_callback(const MIDIPacketList *packets, void* readconn,
 	int			anyadded;
 	int			ret;
 	unsigned char		dat;
-	int			insysex;
-	int			sysexbeg;
 
 	packet = &packets->packet[0];
 	cnt = packets->numPackets;
 	anyadded = 0;
-	insysex = 0;
 
 #if 0
 	printf("MIDI reader callback called\n");
@@ -209,47 +213,52 @@ midi_osx_reader_callback(const MIDIPacketList *packets, void* readconn,
 				anyadded++;
 				break;
 			case 0xF0:
-#if 1
-	printf("Sysex\n");
-#endif
-				++insysex;
-				sysexbeg = t + 1;
+				if(in_sysex) {
+					fprintf(stderr, "Received sysex begin"
+					    " while in sysex!\n");
+					break;
+				}
+				in_sysex++;
 				break;
 
 			case 0xF7:
-				if(!insysex) {
+				if(!in_sysex) {
 					fprintf(stderr,
 					    "Received sysex end but never saw"
 					    " beginning!\n");
 					break;
 				}
-				if(sysexbeg >= t) {
+				if(sysex_in_siz == 0) {
 					fprintf(stderr,
 					    "Zero length Sysex received!\n");
 					break;
 				}
 				ret = midi_queue_addmsg_sysex(midi_inq,
-				    (unsigned char *)&packet->data[sysexbeg],
-				    t - sysexbeg);
+				    sysex_in, sysex_in_siz);
 				if(ret != 0) {
 					fprintf(stderr,
 					    "Can't add MIDI message:"
 					    " %s\n", strerror(ret));
 				}
 
-				insysex = 0;
+				in_sysex = 0;
+				sysex_in_siz = 0;
 
+				break;
 
+			default:
+				if(!in_sysex)
+					break;
+				if(sysex_in_siz >= MIDI_OSX_MAXMSG) {
+					fprintf(stderr,
+					    "Sysex data too long.\n");
+					break;
+				}
+				sysex_in[sysex_in_siz] = dat;
+				sysex_in_siz++;
 			}
 		}
 
-		if(insysex) {
-			fprintf(stderr,
-			    "MIDI packet ended in the middle of sysex!\n");
-			insysex = 0;
-		}
-
-		
 
 		packet = MIDIPacketNext(packet);
 	}
@@ -269,7 +278,6 @@ midi_osx_reader_callback(const MIDIPacketList *packets, void* readconn,
 }
 
 
-#define MIDI_OSX_MAXMSG     65535
 
 int
 midi_osx_sendmsg(unsigned char *msg, size_t msgsiz)

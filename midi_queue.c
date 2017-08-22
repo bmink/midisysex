@@ -5,10 +5,6 @@
 #include "midi_queue.h"
 
 
-static midi_queue_t    *midi_inq;
-static midi_queue_t    *midi_outq;
-
-
 int
 midi_queue_init(midi_queue_t **res)
 {
