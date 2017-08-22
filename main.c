@@ -8,6 +8,7 @@
 #include "barr.h"
 #include "midi_osx.h"
 #include "midi_queue.h"
+#include "btime.h"
 
 
 void
@@ -22,6 +23,9 @@ midi_queue_t	*midi_outq;
 
 void *midi_writer(void *);
 int midi_get_resp();
+
+#define RESPONSE_TIMEOUT_SEC	3
+#define MIDIIO_WAKEUP_MS	50
 
 
 int
@@ -102,16 +106,24 @@ main(int argc, char **argv)
 }
 
 
+
+
 int
 midi_get_resp()
 {
 	int		ret;
-	int		beatclkcnt;
-	int		beatcnt;
 	midi_msg_t	msg;
+	int		haveresp;
+	int		timeout;
+	struct timeval	now;
+	struct timeval	timeoutat;
+	struct timespec	condwaitto;
 
-	beatclkcnt = 0;
-	beatcnt = 0;
+	haveresp = 0;
+	timeout = 0;
+
+	btimeval_tonow(&timeoutat);
+	btimeval_adds(&timeoutat, RESPONSE_TIMEOUT_SEC);
 
 	ret = pthread_mutex_lock(&midi_inq->mq_mutex);
 	if(ret != 0) {
@@ -119,7 +131,15 @@ midi_get_resp()
 		return ENOEXEC;
 	}
 
-	while(1) {
+	while(!haveresp && !timeout) {
+
+		(void) gettimeofday(&now, NULL);
+
+		if(btimeval_cmp(&now, &timeoutat) >= 0) {
+			fprintf(stderr, "Timeout: no answer from device.\n");
+			timeout++;
+			break;
+		}
 
 		while(!midi_queue_isempty(midi_inq)) {
 
@@ -131,9 +151,10 @@ midi_get_resp()
 				exit(-1);
 			}
 
-			if(msg.mm_type == MIDI_MSG_SYSRT_START) {
-				printf("Start received!\n");
-				continue;
+			if(msg.mm_type == MIDI_MSG_SYSEX) {
+				printf("Sysex received!\n");
+				haveresp++;
+				break;
 			}
 				
 			if(msg.mm_type == MIDI_MSG_SYSRT_STOP) {
@@ -143,10 +164,12 @@ midi_get_resp()
 
 		/* No more items to process, so go to sleep until
 		 * something happens on the queue */
-		ret = pthread_cond_wait(&midi_inq->mq_cond,
-		    &midi_inq->mq_mutex);
+		btimespec_tonow(&condwaitto);
+		btimespec_addus(&condwaitto, MIDIIO_WAKEUP_MS * 1000);
+		ret = pthread_cond_timedwait(&midi_inq->mq_cond,
+		    &midi_inq->mq_mutex, &condwaitto);
 
-		if(ret != 0) {
+		if(ret != 0 && ret != ETIMEDOUT) {
 			fprintf(stderr, "Error while waiting on condvar: %s\n"
 			    " This is bad, exiting\n", strerror(ret));
 			exit(-1);
@@ -159,6 +182,9 @@ midi_get_resp()
 		fprintf(stderr, "Can't unlock queue: %s\n", strerror(ret));
 		return ENOEXEC;
 	}
+
+	if(timeout)
+		return ETIMEDOUT;
 
 	return 0;
 
