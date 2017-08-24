@@ -27,12 +27,21 @@ int midi_get_resp();
 #define RESPONSE_TIMEOUT_SEC	3
 #define MIDIIO_WAKEUP_MS	50
 
+#define PROG_STATE_NONE		0
+#define PROG_STATE_RUNNING	1
+#define PROG_STATE_SHUTDOWN	2
+
+int prog_state = PROG_STATE_NONE;
+pthread_rwlock_t prog_state_rwlock;
+
+int set_prog_state(int);
+
 
 int
 main(int argc, char **argv)
 {
 	int		ret;
-	pthread_t	proc_thrd;
+	pthread_t	write_thrd;
 	unsigned char	midireq[] = { 0x42, 0x50, 0x00, 0x01 };
 	//unsigned char	midireq[] = { 0x7E, 0x7F, 0x06, 0x01 };
 	//unsigned char	midireq[] = { 0x42, 0x30, 0x00, 0x01, 0x23, 0x10 };
@@ -60,14 +69,29 @@ main(int argc, char **argv)
 		exit(-1);
 	}
 
+	/* Create global state variable lock */
+	ret = pthread_rwlock_init(&prog_state_rwlock, NULL);
+	if(ret != 0) {
+		fprintf(stderr, "Can't create global state variable rwlock\n");
+		exit(-1);
+	}
+
+	ret = set_prog_state(PROG_STATE_RUNNING);
+	if(ret != 0) {
+		exit(-1);
+	}
+
+
+
+
 	ret = midi_osx_init();
 	if(ret != 0) {
 		fprintf(stderr, "Can't initialize system MIDI.\n");
 		exit(-1);
 	}
 
-	/* Start threads. */
-	ret = pthread_create(&proc_thrd, NULL, midi_writer, NULL);
+	/* Start thread(s). */
+	ret = pthread_create(&write_thrd, NULL, midi_writer, NULL);
 	if(ret != 0) {
 		fprintf(stderr, "Can't start MIDI writer thread: %s\n",
 		    strerror(ret));
@@ -86,6 +110,18 @@ main(int argc, char **argv)
 	ret = midi_get_resp();
 
 
+	/* Signal to thread(s) to shut down. */
+	ret = set_prog_state(PROG_STATE_SHUTDOWN);
+	if(ret != 0) {
+		exit(-1);
+	}
+
+	/* Wait for thread(d) to exit. */
+	ret = pthread_join(write_thrd, NULL);
+	if(ret != 0) {
+		fprintf(stderr, "Can't join writer thread.\n");
+	}
+
 	ret = midi_osx_uninit();
 	if(ret != 0) {
 		fprintf(stderr, "Can't uninitialize system MIDI.\n");
@@ -99,6 +135,13 @@ main(int argc, char **argv)
 	ret = midi_queue_uninit(&midi_outq);
 	if(ret != 0) {
 		fprintf(stderr, "Can't uninitialize MIDI out queue\n");
+	}
+
+	(void) set_prog_state(PROG_STATE_NONE);
+
+	ret = pthread_rwlock_destroy(&prog_state_rwlock);
+	if(ret != 0) {
+		fprintf(stderr, "Can't destroy global state variable rwlock\n");
 	}
 
 	return 0;
@@ -195,14 +238,13 @@ void *
 midi_writer(void *arg)
 {
 	int		ret;
-	int		beatclkcnt;
-	int		beatcnt;
 	midi_msg_t	msg;
 	bstr_t		*midimsg;
+	int		doshutdown;
+	struct timespec	condwaitto;
 
-	beatclkcnt = 0;
-	beatcnt = 0;
 	midimsg = 0;
+	doshutdown = 0;
 
 	printf("MIDI writer thread started.\n");
 	fflush(stdout);
@@ -214,6 +256,28 @@ midi_writer(void *arg)
 	}
 
 	while(1) {
+
+		/* Check whether it's time to quit. */
+		ret = pthread_rwlock_rdlock(&prog_state_rwlock);
+		if(ret != 0) {
+			fprintf(stderr,
+			    "Can't lock global state rwlock for reading: %s\n",
+			    strerror(ret));
+			exit(-1);	
+		}
+		if(prog_state == PROG_STATE_SHUTDOWN) {
+			doshutdown++;
+		}
+		ret = pthread_rwlock_unlock(&prog_state_rwlock);
+		if(ret != 0) {
+			fprintf(stderr,
+			    "Can't unlock global state rwlock"
+			    " after reading: %s\n", strerror(ret));
+			exit(-1);	
+		}
+
+		if(doshutdown)
+			break;
 
 		while(!midi_queue_isempty(midi_outq)) {
 
@@ -261,22 +325,57 @@ midi_writer(void *arg)
 
 		/* No more items to process, so go to sleep until
 		 * something happens on the queue */
-		ret = pthread_cond_wait(&midi_outq->mq_cond,
-		    &midi_outq->mq_mutex);
-
-		if(ret != 0) {
+		btimespec_tonow(&condwaitto);
+		btimespec_addus(&condwaitto, MIDIIO_WAKEUP_MS * 1000);
+		ret = pthread_cond_timedwait(&midi_outq->mq_cond,
+		    &midi_outq->mq_mutex, &condwaitto);
+		if(ret != 0 && ret != ETIMEDOUT) {
 			fprintf(stderr, "Error while waiting on condvar: %s\n"
 			    " This is bad, exiting\n", strerror(ret));
 			exit(-1);
 		}
 	}
 
-	ret = pthread_mutex_unlock(&midi_inq->mq_mutex);
+	ret = pthread_mutex_unlock(&midi_outq->mq_mutex);
 	if(ret != 0) {
 		fprintf(stderr, "Can't unlock queue: %s\n", strerror(ret));
 		return (void *) -1;
 	}
 
+	printf("MIDI writer thread exiting.\n");
+	fflush(stdout);
+
 	return (void *) 0;
 
 }
+
+
+int
+set_prog_state(int newstate)
+{
+	int	ret;
+
+	ret = pthread_rwlock_wrlock(&prog_state_rwlock);
+	if(ret != 0) {
+		fprintf(stderr,
+		    "Can't lock global state rwlock for writing: %s\n",
+		    strerror(ret));
+		return ret;
+	}
+
+	prog_state = newstate;
+	
+	ret = pthread_rwlock_unlock(&prog_state_rwlock);
+	if(ret != 0) {
+		fprintf(stderr,
+		    "Can't unlock global state rwlock after writing: %s\n",
+		    strerror(ret));
+		return ret;
+	}
+
+	return 0;
+
+}
+
+
+
