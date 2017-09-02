@@ -240,6 +240,7 @@ midi_osx_reader_callback(const MIDIPacketList *packets, void* readconn,
 					    "Can't add MIDI message:"
 					    " %s\n", strerror(ret));
 				}
+				anyadded++;
 
 				in_sysex = 0;
 				sysex_in_siz = 0;
@@ -256,6 +257,7 @@ midi_osx_reader_callback(const MIDIPacketList *packets, void* readconn,
 				}
 				sysex_in[sysex_in_siz] = dat;
 				sysex_in_siz++;
+				break;
 			}
 		}
 

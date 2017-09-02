@@ -112,7 +112,6 @@ midi_queue_addmsg_sysex(midi_queue_t *mq, unsigned char *payload,
 
 	midi_msg_t	mmsg;
 	int		ret;
-	int		i;
 
 	if(mq == NULL)
 		return EINVAL;
@@ -120,7 +119,7 @@ midi_queue_addmsg_sysex(midi_queue_t *mq, unsigned char *payload,
 	if(payload == NULL || siz == 0)
 		return EINVAL;
 
-#if 1
+#if 0
 	printf("Sysex msg added, siz = %zu, msg = ", siz);
 	for(i = 0; i < siz; ++i) {
 		printf("0x%02x ", payload[i]);

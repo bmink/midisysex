@@ -21,6 +21,9 @@ usage(char *prognam)
 midi_queue_t	*midi_inq;
 midi_queue_t	*midi_outq;
 
+unsigned char	*midi_resp;
+size_t		midi_resp_siz;
+
 void *midi_writer(void *);
 int midi_get_resp();
 
@@ -36,18 +39,30 @@ pthread_rwlock_t prog_state_rwlock;
 
 int set_prog_state(int);
 
+int decode_payload(bstr_t *, unsigned char *, size_t);
+
 
 int
 main(int argc, char **argv)
 {
 	int		ret;
 	pthread_t	write_thrd;
-	unsigned char	midireq[] = { 0x42, 0x50, 0x00, 0x01 };
+	//unsigned char	midireq[] = { 0x42, 0x50, 0x00, 0x01 };
 	//unsigned char	midireq[] = { 0x7E, 0x7F, 0x06, 0x01 };
-	//unsigned char	midireq[] = { 0x42, 0x30, 0x00, 0x01, 0x23, 0x10 };
+	unsigned char	midireq[] = { 0x42, 0x30, 0x00, 0x01, 0x23, 0x10 };
+	bstr_t		*sysex_payload;
+#if 0
+	unsigned char	*buf;
+	int		i;
+#endif
 
 	midi_inq = NULL;
 	midi_outq = NULL;
+
+	midi_resp = NULL;
+	midi_resp_siz = 0;
+
+	sysex_payload = NULL;
 
 #if 0
 	if(argc != 2 || xstrempty(argv[1])) {
@@ -81,9 +96,6 @@ main(int argc, char **argv)
 		exit(-1);
 	}
 
-
-
-
 	ret = midi_osx_init();
 	if(ret != 0) {
 		fprintf(stderr, "Can't initialize system MIDI.\n");
@@ -100,14 +112,66 @@ main(int argc, char **argv)
 
 
 	ret = midi_queue_addmsg_sysex(midi_outq,
-	    (unsigned char *) midireq, 4);
+	    (unsigned char *) midireq, 6);
 
-	/* Usually a program like this would have a writer and a reader thread.
+	/* Usually a MIDI program would have a writer and a reader thread.
 	 * However, since here we're just waiting for a specific response,
 	 * we're essentially executing the "reader thread" on the main
 	 * thread. */
 
 	ret = midi_get_resp();
+
+	if(ret == ETIMEDOUT) {
+		fprintf(stderr, "Timeout: no answer from device.\n");
+	} else
+	if(ret != 0) {
+		fprintf(stderr, "Error: %s.\n", strerror(ret));
+	} else
+	if(midi_resp == NULL || midi_resp_siz == 0) {
+		fprintf(stderr, "Empty response.\n");
+	} else {
+#if 0
+		printf("MIDI response, siz = %zu, msg = ", midi_resp_siz);
+		for(i = 0; i < midi_resp_siz; ++i) {
+			printf("0x%02x ", midi_resp[i]);
+		}
+		printf("\n");
+#endif
+
+		sysex_payload = binit();
+		if(sysex_payload == NULL) {
+			fprintf(stderr,
+			    "Can't allocate memory for decoded payload.\n");
+		} else {
+			ret = decode_payload(sysex_payload, midi_resp + 6,
+			    midi_resp_siz - 6);
+			if(ret != 0) {
+				fprintf(stderr,
+				    "Can't decode payload.\n");
+			} else {
+#if 0
+				buf = (unsigned char *) bget(sysex_payload);
+				if(buf) {
+					printf("decoded, siz = %i, msg =\n",
+					    bstrlen(sysex_payload));
+					for(i = 0; i < bstrlen(sysex_payload);
+					    ++i) {
+						printf("%d. 0x%02x\n",
+						    i, buf[i]);
+					}
+					printf("\n");
+				}
+#endif
+
+				ret = btofilep(stdout, sysex_payload);
+				if(ret != 0) {
+					fprintf(stderr,
+					    "Can't write sysex to output.\n");
+				}
+			}
+
+		}
+	}
 
 
 	/* Signal to thread(s) to shut down. */
@@ -144,11 +208,14 @@ main(int argc, char **argv)
 		fprintf(stderr, "Can't destroy global state variable rwlock\n");
 	}
 
+	if(midi_resp)
+		free(midi_resp);
+	midi_resp_siz = 0;
+
+	buninit(&sysex_payload);
+
 	return 0;
-
 }
-
-
 
 
 int
@@ -161,9 +228,11 @@ midi_get_resp()
 	struct timeval	now;
 	struct timeval	timeoutat;
 	struct timespec	condwaitto;
+	int		err;
 
 	haveresp = 0;
 	timeout = 0;
+	err = 0;
 
 	btimeval_tonow(&timeoutat);
 	btimeval_adds(&timeoutat, RESPONSE_TIMEOUT_SEC);
@@ -179,8 +248,8 @@ midi_get_resp()
 		(void) gettimeofday(&now, NULL);
 
 		if(btimeval_cmp(&now, &timeoutat) >= 0) {
-			fprintf(stderr, "Timeout: no answer from device.\n");
 			timeout++;
+			err = ETIMEDOUT;
 			break;
 		}
 
@@ -195,15 +264,26 @@ midi_get_resp()
 			}
 
 			if(msg.mm_type == MIDI_MSG_SYSEX) {
+#if 0
 				printf("Sysex received!\n");
+#endif
 				haveresp++;
+				
+				midi_resp = memdup(msg.mm_payload,
+				    msg.mm_payload_siz);
+				if(midi_resp == NULL) {
+					fprintf(stderr,
+					    "Can't copy MIDI response.\n");
+					break;
+				}
+
+				midi_resp_siz = msg.mm_payload_siz;
 				break;
 			}
 				
-			if(msg.mm_type == MIDI_MSG_SYSRT_STOP) {
-				printf("\nStop received.\n");
-			}
+			(void) midi_msg_free_payload(&msg);
 		}
+
 
 		/* No more items to process, so go to sleep until
 		 * something happens on the queue */
@@ -226,11 +306,7 @@ midi_get_resp()
 		return ENOEXEC;
 	}
 
-	if(timeout)
-		return ETIMEDOUT;
-
-	return 0;
-
+	return err;
 }
 
 
@@ -246,8 +322,10 @@ midi_writer(void *arg)
 	midimsg = 0;
 	doshutdown = 0;
 
+#if 0
 	printf("MIDI writer thread started.\n");
 	fflush(stdout);
+#endif
 
 	ret = pthread_mutex_lock(&midi_outq->mq_mutex);
 	if(ret != 0) {
@@ -310,8 +388,11 @@ midi_writer(void *arg)
 				if(ret != 0) {
 					fprintf(stderr,
 					    "Couldn't send MIDI message.\n");
-				} else
+				} else {
+#if 0
 					printf("MIDI message sent.\n");
+#endif
+				}
 
 			} else {
 				printf("MIDI message not sent.\n");
@@ -342,8 +423,10 @@ midi_writer(void *arg)
 		return (void *) -1;
 	}
 
+#if 0
 	printf("MIDI writer thread exiting.\n");
 	fflush(stdout);
+#endif
 
 	return (void *) 0;
 
@@ -378,4 +461,42 @@ set_prog_state(int newstate)
 }
 
 
+int
+decode_payload(bstr_t *dec, unsigned char *enc, size_t encsiz)
+{
+	/* All bytes in MIDI payloads have to have their MSB set to 0
+	 * (ie. < 0x80) so that interleaved MIDI commands can be distinguished
+	 * during transfer (all MIDI commands are >= 0x80). This is done by
+	 * taking 7 bytes of payload, stripping them of their MSBs and adding
+	 * an 8th byte that contains the 7 bytes' MSBs.
+	 */
+
+	unsigned char	cur;
+	unsigned char	msb_byte;
+	int		i;
+
+	if(dec == NULL || enc == 0 || encsiz == 0)
+		return EINVAL;
+
+	for(i = 0; i < encsiz; ++i) {
+		cur = enc[i];
+	
+		if(i % 8 == 0) {
+			/* This is the byte that contains the MSBs. */
+			msb_byte = cur;
+			continue;
+		}
+
+		/* Add the MSB. */
+		cur += (msb_byte & 1) << 7;
+
+		bmemcat(dec, (char *) &cur, 1);
+
+		/* Move up the bits in the MSB byte. */
+		msb_byte >>= 1;
+	
+	}
+
+	return 0;
+}
 
